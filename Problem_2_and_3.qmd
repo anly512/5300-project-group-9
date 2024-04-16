@@ -1,0 +1,545 @@
+---
+title: "Problem 2 and Problem 3"
+format: html
+embed-resources: true
+---
+Problem 2: What are the factors that influence the number of cases?
+Problem 3: What are the factors that influence the resolution rate?
+
+Part 1: Data Cleaning and EDA
+
+1-1 Data Cleaning
+```{r}
+data_311 <- read.csv("311_Cases_cleaned.csv")
+head(data_311)
+print(nrow(data_311)) 
+print(ncol(data_311)) 
+```
+
+```{r}
+library(dplyr)
+data_311_group_rate <- data_311 %>%
+  group_by(neighborhood, year, registered, turnout, turnout_one_lag, turnout_two_lag, income, population, white, black, asian, num_cases) %>%
+  summarise(resolution_rate = mean(resolution_rate), .groups = 'drop')
+head(data_311_group_rate)
+print(nrow(data_311_group_rate)) 
+print(ncol(data_311_group_rate)) 
+```
+
+```{r}
+numeric_data_311 <- data_311_group_rate[ , !names(data_311_group_rate)%in%c("neighborhood", "year")]
+head(numeric_data_311)
+```
+
+1-2 correlation matrix
+```{r}
+correlation_matrix_311 <- cor(numeric_data_311)
+#install.packages("corrplot")
+library(corrplot)
+corrplot(correlation_matrix_311, method = "color")
+```
+
+
+1-3 scatter plots 
+```{r}
+library(ggplot2)
+par(mfrow = c(3,2))
+plot(numeric_data_311$population, numeric_data_311$num_cases, main = "Number of cases vs population", xlab = "population", ylab = "Number of Cases")
+plot(numeric_data_311$turnout_two_lag, numeric_data_311$num_cases, main = "Number of cases vs turnout two lag", xlab = "turnout two lag", ylab = "Number of Cases")
+plot(numeric_data_311$registered, numeric_data_311$resolution_rate, main = "Resolution Rate vs registered", xlab = "registered", ylab = "Resolution Rate")
+plot(numeric_data_311$turnout_one_lag, numeric_data_311$resolution_rate, main = "Resolution Rate vs turnout one lag", xlab = "turnout one lag", ylab = "Resolution Rate")
+plot(numeric_data_311$income, numeric_data_311$resolution_rate, main = "Resolution Rate vs income", xlab = "income", ylab = "Resolution Rate")
+plot(numeric_data_311$asian, numeric_data_311$resolution_rate, main = "Resolution Rate vs asian", xlab = "asian", ylab = "Resolution Rate")
+```
+
+Part 2 Problem 2 -- model selection 
+```{r}
+library(ISLR)
+library(leaps)
+library(tidyverse)
+library(caret)
+```
+
+2-1 Best subset selection
+```{r}
+regfit_311=regsubsets(num_cases~.,numeric_data_311)
+summary(regfit_311)
+reg.summary_8=summary(regfit_311)
+```
+
+```{r}
+regfit_311_full=regsubsets(num_cases~.,numeric_data_311, nvmax=10)
+summary(regfit_311_full)
+reg.summary_10=summary(regfit_311_full)
+```
+
+```{r}
+coef(regfit_311_full,10)
+```
+
+```{r}
+print(reg.summary_10$rsq)# The last model with all variables performs the best
+print(reg.summary_10$adjr2)# The 7th variable without registered, turnout_one_lag, and resolution_rate performs the best
+plot(regfit_311_full,scale="adjr2")
+plot(reg.summary_10$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+m=which.max(reg.summary_10$adjr2); 
+points(m,reg.summary_10$adjr2[m], col="red",cex=2,pch=20)
+```
+
+```{r}
+plot(reg.summary_10$cp,xlab="Number of Variables",ylab="Cp",type='l')
+m=which.min(reg.summary_10$cp)
+print(c("optimal feature subset-size according to cp:",m))# population should also be removed
+points(m,reg.summary_10$cp[m],col="red",cex=2,pch=20)
+```
+
+```{r}
+m=which.min(reg.summary_10$bic)
+print(c("optimal feature subset-size according to BIC:",m))
+plot(reg.summary_10$bic,xlab="Number of Variables",ylab="BIC",type='l')
+points(m,reg.summary_10$bic[m],col="red",cex=2,pch=20) # Only population should be used
+```
+
+2-2 Forward and Backward stepwise selection
+```{r}
+regfit.fwd=regsubsets(num_cases~.,numeric_data_311, nvmax=10,method="forward")
+summary(regfit.fwd)
+```
+
+```{r}
+regfit.bwd=regsubsets(num_cases~.,numeric_data_311, nvmax=10,method="backward")
+summary(regfit.bwd)
+```
+
+```{r}
+print(coef(regfit_311_full,6))
+print(coef(regfit.fwd,6))
+print(coef(regfit.bwd,6))
+```
+
+```{r}
+print(coef(regfit_311_full,7))
+print(coef(regfit.fwd,7))
+print(coef(regfit.bwd,7))
+```
+
+2-3 Cross validation
+```{r}
+set.seed(581)
+train=sample(c(TRUE,FALSE), nrow(numeric_data_311),rep=TRUE)
+test=(!train)
+```
+
+```{r}
+regfit.best=regsubsets(num_cases~.,data=numeric_data_311[train,],nvmax=10)
+test.mat=model.matrix(num_cases~.,data=numeric_data_311[test,])
+#print(head(test.mat))
+# Initialize a vector to store validation errors, with length 10
+val.errors = rep(NA, 10)
+# Iterate through 19 iterations
+for (i in 1:10) {
+  # Extract coefficients for the 'i-th' subset from the 'regfit.best' object
+  coefi = coef(regfit.best, id = i)
+  # Select the predictor variables based on the coefficients
+  # and predict using the 'test.mat' data
+  pred = test.mat[, names(coefi)] %*% coefi
+  # Calculate the validation error as mean squared error
+  # by comparing the predicted values with the actual 'Salary' values
+  val.errors[i] = mean((numeric_data_311$num_cases[test] - pred)^2)
+}
+m=which.min(val.errors) 
+print(m)
+print(coef(regfit.best,m))# Cross validation shows the best model is the one with 3 variables
+```
+
+2-4 K-fold cross validation
+```{r}
+k = 10
+set.seed(1)
+folds = sample(1:k, nrow(numeric_data_311), replace = TRUE)
+
+# Define a function called predict.regsubsets
+predict.regsubsets = function(object, newdata, id, ...) {
+  
+  # Extract the formula used to fit the model
+  form = as.formula(object$call[[2]])
+  
+  # Create the model matrix for the new data based on the formula used in the model fitting
+  mat = model.matrix(form, newdata)
+  
+  # Obtain the coefficients for the specified model subset (id)
+  coefi = coef(object, id = id)
+  
+  # Extract the names of the predictor variables
+  xvars = names(coefi)
+  
+  # Multiply the subset of the model matrix with the corresponding coefficients
+  # This calculates the predicted values for the new data
+  mat[, xvars] %*% coefi
+}
+
+# Create a matrix to store cross-validation errors
+# Rows correspond to folds, columns correspond to different subsets of variables (1 to 19)
+cv.errors = matrix(NA, k, 10, dimnames = list(NULL, paste(1:10)))
+
+# Loop over each fold for cross-validation
+for (j in 1:k) {
+  # Fit regression models using subsets of predictors
+  # Leave out the 'j-th' fold for validation
+  best.fit = regsubsets(num_cases ~ ., data = numeric_data_311[folds != j, ], nvmax = 10)
+  
+  # Loop over each subset size (1 to 19)
+  for (i in 1:10) {
+    # Make predictions using the 'i-th' subset from the 'best.fit' model
+    pred = predict(best.fit, numeric_data_311[folds == j, ], id = i)
+    
+    # Calculate the mean squared error for the current fold and subset
+    cv.errors[j, i] = mean((numeric_data_311$num_cases[folds == j] - pred)^2)
+  }
+}
+
+# Calculate the mean cross-validation errors across all folds for each subset size
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+# Print the mean cross-validation errors
+print(mean.cv.errors)
+# Set the plotting layout to a single panel
+par(mfrow = c(1, 1))
+
+# Plot the mean cross-validation errors
+plot(mean.cv.errors, type = 'b')
+```
+```{r}
+reg.best=regsubsets(num_cases~.,data=numeric_data_311, nvmax=10)
+print(coef(reg.best,4))
+```
+
+Part 3 Problem 2 -- Regression
+
+3-1 General Linear Model and Linear Model
+```{r}
+glm.fit_1 <- glm(num_cases ~ turnout + turnout_two_lag + population + black, data = numeric_data_311)
+print(coef(glm.fit_1))
+```
+
+```{r}
+predicted_values_1 <- predict(glm.fit_1, type = "response")
+errors_1 <- numeric_data_311$num_cases - predicted_values_1
+mse_1 <- mean(errors_1^2)
+print(mse_1)
+```
+
+```{r}
+glm.fit_2 <- glm(num_cases ~ turnout + turnout_two_lag + income + population + white + black + asian, data = numeric_data_311)
+print(coef(glm.fit_2))
+```
+
+```{r}
+predicted_values_2 <- predict(glm.fit_2, type = "response")
+errors_2 <- numeric_data_311$num_cases - predicted_values_2
+mse_2 <- mean(errors_2^2)
+print(mse_2)
+```
+
+```{r}
+set.seed(123)
+
+n <- nrow(numeric_data_311)
+indices <- sample(1:n, size = floor(0.8 * n))
+train_set <- numeric_data_311[indices, ]
+test_set <- numeric_data_311[-indices, ]
+
+glm.fit_1 <- glm(num_cases ~ turnout + turnout_two_lag + population + black, data = train_set)
+glm.fit_2 <- glm(num_cases ~ turnout + turnout_two_lag + income + population + white + black + asian, data = train_set)
+
+predictions_1 <- predict(glm.fit_1, test_set, type = "response")
+predictions_2 <- predict(glm.fit_2, test_set, type = "response")
+
+mse_1 <- mean((test_set$num_cases - predictions_1)^2)
+mse_2 <- mean((test_set$num_cases - predictions_2)^2)
+print(mse_1)
+print(mse_2)
+```
+
+```{r}
+lm.fit <- lm(num_cases ~ turnout + turnout_two_lag + income + population + white + black + asian, data = train_set)
+
+predictions_lm <- predict(lm.fit, test_set, type = "response")
+
+mse_lm <- mean((test_set$num_cases - predictions_lm)^2)
+print(mse_lm)
+```
+
+The second model with 7 features perform better. 
+
+3-2 Ridge Regression
+```{r}
+require(glmnet)
+x_train <- train_set %>%
+  select(-num_cases, -registered, -turnout_one_lag, -resolution_rate) %>%
+  as.matrix()
+y_train <- train_set$num_cases
+x_test <- test_set %>%
+  select(-num_cases, -registered, -turnout_one_lag, -resolution_rate) %>%
+  as.matrix()
+y_test <- test_set$num_cases
+set.seed(581) 
+cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0, type.measure = "mse")
+plot(cv_ridge$lambda, cv_ridge$cvm, type = 'l', xlab = "Log(lambda)", ylab = "Test MSE",
+     log = "x")
+title("Test MSE vs. Log(lambda) for Ridge Regression")
+best_lambda <- cv_ridge$lambda.min
+ridge_pred <- predict(cv_ridge, s = best_lambda, newx = x_test)
+ridge_test_error <- mean((y_test - ridge_pred)^2)
+print(ridge_test_error)
+```
+
+3-3 LASSO Regression
+```{r}
+library(glmnet)
+cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1, type.measure = "mse")
+plot(cv_lasso$lambda, cv_lasso$cvm, type = 'l', xlab = "Log(lambda)", ylab = "MSE", log = "x")
+title("MSE vs. Log(lambda) for LASSO Regression")
+plot(log(cv_lasso$lambda), colSums(coef(cv_lasso, s=cv_lasso$lambda) != 0), type='l', xlab = "Log(lambda)", ylab = "Number of Non-Zero Coefficients")
+title("Non-Zero Coefficients vs. Log(lambda)")
+best_lambda <- cv_lasso$lambda.min
+lasso_pred <- predict(cv_lasso, s = best_lambda, newx = x_test)
+lasso_test_error <- mean((y_test - lasso_pred)^2)
+print(lasso_test_error)
+```
+The best model is general linear model, and it is just the linear model. 
+turnout + turnout_two_lag + income + population + white + black + asian
+
+
+Part 4 Problem 3 -- model selection 
+
+4-1 Best subset selection
+```{r}
+regfit_311=regsubsets(resolution_rate~.,numeric_data_311)
+summary(regfit_311)
+reg.summary_8=summary(regfit_311)
+```
+
+```{r}
+regfit_311_full=regsubsets(resolution_rate~.,numeric_data_311, nvmax=10)
+summary(regfit_311_full)
+reg.summary_10=summary(regfit_311_full)
+```
+
+```{r}
+coef(regfit_311_full,10)
+```
+
+```{r}
+print(reg.summary_10$rsq)# The last model with all variables performs the best
+print(reg.summary_10$adjr2)# The 6th variable without registered, turnout, black and num_cases performs the best
+plot(regfit_311_full,scale="adjr2")
+plot(reg.summary_10$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+m=which.max(reg.summary_10$adjr2); 
+points(m,reg.summary_10$adjr2[m], col="red",cex=2,pch=20)
+```
+
+```{r}
+plot(reg.summary_10$cp,xlab="Number of Variables",ylab="Cp",type='l')
+m=which.min(reg.summary_10$cp)
+print(c("optimal feature subset-size according to cp:",m))# The 4th model performs the best
+points(m,reg.summary_10$cp[m],col="red",cex=2,pch=20)
+```
+
+```{r}
+m=which.min(reg.summary_10$bic)
+print(c("optimal feature subset-size according to BIC:",m))
+plot(reg.summary_10$bic,xlab="Number of Variables",ylab="BIC",type='l')
+points(m,reg.summary_10$bic[m],col="red",cex=2,pch=20) # Only income and white should be used
+```
+
+4-2 Forward and Backward stepwise selection
+```{r}
+regfit.fwd=regsubsets(resolution_rate~.,numeric_data_311, nvmax=10,method="forward")
+summary(regfit.fwd)
+```
+
+```{r}
+regfit.bwd=regsubsets(resolution_rate~.,numeric_data_311, nvmax=10,method="backward")
+summary(regfit.bwd)
+```
+
+```{r}
+print(coef(regfit_311_full,6))
+print(coef(regfit.fwd,6))
+print(coef(regfit.bwd,6))
+```
+
+```{r}
+print(coef(regfit_311_full,4))
+print(coef(regfit.fwd,4))
+print(coef(regfit.bwd,4))
+```
+
+4-3 Cross validation
+```{r}
+set.seed(581)
+train=sample(c(TRUE,FALSE), nrow(numeric_data_311),rep=TRUE)
+test=(!train)
+```
+
+```{r}
+regfit.best=regsubsets(resolution_rate~.,data=numeric_data_311[train,],nvmax=10)
+test.mat=model.matrix(resolution_rate~.,data=numeric_data_311[test,])
+#print(head(test.mat))
+# Initialize a vector to store validation errors, with length 10
+val.errors = rep(NA, 10)
+# Iterate through 19 iterations
+for (i in 1:10) {
+  # Extract coefficients for the 'i-th' subset from the 'regfit.best' object
+  coefi = coef(regfit.best, id = i)
+  # Select the predictor variables based on the coefficients
+  # and predict using the 'test.mat' data
+  pred = test.mat[, names(coefi)] %*% coefi
+  # Calculate the validation error as mean squared error
+  # by comparing the predicted values with the actual 'Salary' values
+  val.errors[i] = mean((numeric_data_311$resolution_rate[test] - pred)^2)
+}
+m=which.min(val.errors) 
+print(m)
+print(coef(regfit.best,m))# Cross validation shows the best model is the one with 3 variables
+```
+
+4-4 K-fold cross validation
+```{r}
+k = 10
+set.seed(1)
+folds = sample(1:k, nrow(numeric_data_311), replace = TRUE)
+
+# Define a function called predict.regsubsets
+predict.regsubsets = function(object, newdata, id, ...) {
+  
+  # Extract the formula used to fit the model
+  form = as.formula(object$call[[2]])
+  
+  # Create the model matrix for the new data based on the formula used in the model fitting
+  mat = model.matrix(form, newdata)
+  
+  # Obtain the coefficients for the specified model subset (id)
+  coefi = coef(object, id = id)
+  
+  # Extract the names of the predictor variables
+  xvars = names(coefi)
+  
+  # Multiply the subset of the model matrix with the corresponding coefficients
+  # This calculates the predicted values for the new data
+  mat[, xvars] %*% coefi
+}
+
+# Create a matrix to store cross-validation errors
+# Rows correspond to folds, columns correspond to different subsets of variables (1 to 19)
+cv.errors = matrix(NA, k, 10, dimnames = list(NULL, paste(1:10)))
+
+# Loop over each fold for cross-validation
+for (j in 1:k) {
+  # Fit regression models using subsets of predictors
+  # Leave out the 'j-th' fold for validation
+  best.fit = regsubsets(resolution_rate ~ ., data = numeric_data_311[folds != j, ], nvmax = 10)
+  
+  # Loop over each subset size (1 to 19)
+  for (i in 1:10) {
+    # Make predictions using the 'i-th' subset from the 'best.fit' model
+    pred = predict(best.fit, numeric_data_311[folds == j, ], id = i)
+    
+    # Calculate the mean squared error for the current fold and subset
+    cv.errors[j, i] = mean((numeric_data_311$resolution_rate[folds == j] - pred)^2)
+  }
+}
+
+# Calculate the mean cross-validation errors across all folds for each subset size
+mean.cv.errors = apply(cv.errors, 2, mean)
+
+# Print the mean cross-validation errors
+print(mean.cv.errors)
+# Set the plotting layout to a single panel
+par(mfrow = c(1, 1))
+
+# Plot the mean cross-validation errors
+plot(mean.cv.errors, type = 'b')
+```
+```{r}
+reg.best=regsubsets(resolution_rate~.,data=numeric_data_311, nvmax=10)
+print(coef(reg.best,4))
+```
+
+Part 5 Problem 3 -- Regression
+
+5-1 General Linear Model and Linear Model
+```{r}
+glm.fit <- glm(resolution_rate ~ turnout_one_lag + turnout_two_lag + income + white, data = numeric_data_311)
+print(coef(glm.fit))
+```
+
+```{r}
+predicted_values <- predict(glm.fit, type = "response")
+errors <- numeric_data_311$resolution_rate - predicted_values
+mse <- mean(errors^2)
+print(mse)
+```
+
+```{r}
+set.seed(123)
+
+n <- nrow(numeric_data_311)
+indices <- sample(1:n, size = floor(0.8 * n))
+train_set <- numeric_data_311[indices, ]
+test_set <- numeric_data_311[-indices, ]
+
+glm.fit <- glm(resolution_rate ~ turnout_one_lag + turnout_two_lag + income + white, data = train_set)
+
+predictions <- predict(glm.fit, test_set, type = "response")
+
+mse <- mean((test_set$resolution_rate - predictions)^2)
+print(mse)
+```
+
+```{r}
+lm.fit <- lm(resolution_rate ~ turnout_one_lag + turnout_two_lag + income + white, data = train_set)
+
+predictions_lm <- predict(lm.fit, test_set, type = "response")
+
+mse_lm <- mean((test_set$resolution_rate - predictions_lm)^2)
+print(mse_lm)
+```
+
+The second model with 7 features perform better. 
+
+5-2 Ridge Regression
+```{r}
+require(glmnet)
+x_train <- as.matrix(train_set[, c("turnout_one_lag", "turnout_two_lag", "income", "white")])
+y_train <- train_set$resolution_rate
+x_test <- as.matrix(test_set[, c("turnout_one_lag", "turnout_two_lag", "income", "white")])
+y_test <- test_set$resolution_rate
+set.seed(581) 
+cv_ridge <- cv.glmnet(x_train, y_train, alpha = 0, type.measure = "mse")
+plot(cv_ridge$lambda, cv_ridge$cvm, type = 'l', xlab = "Log(lambda)", ylab = "Test MSE",
+     log = "x")
+title("Test MSE vs. Log(lambda) for Ridge Regression")
+best_lambda <- cv_ridge$lambda.min
+ridge_pred <- predict(cv_ridge, s = best_lambda, newx = x_test)
+ridge_test_error <- mean((y_test - ridge_pred)^2)
+print(ridge_test_error)
+```
+
+5-3 LASSO Regression
+```{r}
+library(glmnet)
+cv_lasso <- cv.glmnet(x_train, y_train, alpha = 1, type.measure = "mse")
+plot(cv_lasso$lambda, cv_lasso$cvm, type = 'l', xlab = "Log(lambda)", ylab = "MSE", log = "x")
+title("MSE vs. Log(lambda) for LASSO Regression")
+plot(log(cv_lasso$lambda), colSums(coef(cv_lasso, s=cv_lasso$lambda) != 0), type='l', xlab = "Log(lambda)", ylab = "Number of Non-Zero Coefficients")
+title("Non-Zero Coefficients vs. Log(lambda)")
+best_lambda <- cv_lasso$lambda.min
+lasso_pred <- predict(cv_lasso, s = best_lambda, newx = x_test)
+lasso_test_error <- mean((y_test - lasso_pred)^2)
+print(lasso_test_error)
+```
+
+The factors are turnout_one_lag + turnout_two_lag + income + white.
+
