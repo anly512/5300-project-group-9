@@ -1,0 +1,135 @@
+---
+title: "5300project_q8"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+library(readxl)
+data <- read_excel("./311_Cases_cleaned.xlsx")
+
+```
+
+```{r}
+str(data)
+summary(data)
+
+```
+
+```{r}
+colSums(is.na(data))
+```
+
+```{r}
+data$date <- as.Date(data$date, format="%m/%d/%Y %H:%M:%S %p")
+data$case <- as.factor(data$case)
+data$month <- as.factor(data$month)
+data$year <- as.numeric(as.character(data$year))
+
+```
+
+```{r}
+mean_resolution_rate <- mean(data$resolution_rate, na.rm = TRUE)
+print(paste("Average Resolution Rate:", mean_resolution_rate))
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(plotly)
+
+case_type_rates <- data %>%
+  group_by(case) %>%
+  summarise(Average_Resolution_Rate = mean(resolution_rate, na.rm = TRUE))
+
+g <- ggplot(case_type_rates, aes(x = reorder(case, -Average_Resolution_Rate), y = Average_Resolution_Rate, fill = case)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 3)) +
+  labs(title = "Average Resolution Rate by Case Type", x = "Case Type", y = "Average Resolution Rate")
+
+ggplotly(g)
+
+```
+
+```{r}
+data$date <- as.Date(data$date, format="%Y-%m-%d")
+
+yearly_rates <- data %>%
+  mutate(Year = format(date, "%Y")) %>%
+  group_by(Year) %>%
+  summarise(Average_Resolution_Rate = mean(resolution_rate, na.rm = TRUE))
+
+ggplot(data = yearly_rates, aes(x = Year, y = Average_Resolution_Rate, group = 1)) + 
+  geom_line() +
+  geom_point() + 
+  labs(title = "Trend of Resolution Rate Over Years", x = "Year", y = "Average Resolution Rate")
+
+
+```
+
+```{r}
+monthly_rates <- data %>%
+  mutate(Month = format(date, "%Y-%m")) %>%
+  group_by(Month) %>%
+  summarise(Average_Resolution_Rate = mean(resolution_rate, na.rm = TRUE))
+
+#monthly_rates$Month <- as.Date(as.character(monthly_rates$Month), format="%Y-%m")
+
+
+
+ggplot(monthly_rates, aes(x = Month, y = Average_Resolution_Rate, group = 1)) +
+  geom_line() + 
+  geom_point() +
+  labs(title = "Trend of Resolution Rate Over Months", x = "Month", y = "Average Resolution Rate") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+```{r}
+ggplot(case_type_rates, aes(x = reorder(case, -Average_Resolution_Rate), y = Average_Resolution_Rate)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Average Resolution Rate by Case Type", x = "Case Type", y = "Average Resolution Rate") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r}
+
+ggplot(data, aes(x = case, y = resolution_rate)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Resolution Rates by Case Type", x = "Case Type", y = "Resolution Rate") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r}
+library(forecast)
+library(lubridate)
+
+monthly_rates$Month <- as.Date(paste0(monthly_rates$Month, "-01"), format="%Y-%m-%d")
+
+resolution_ts <- ts(monthly_rates$Average_Resolution_Rate, 
+                    start = c(year(min(monthly_rates$Month)), 
+                              month(min(monthly_rates$Month))), 
+                    frequency = 12)
+
+
+fit_arima <- auto.arima(resolution_ts)
+
+summary(fit_arima)
+
+```
+
+```{r}
+forecast_arima <- forecast(fit_arima, h=12)
+
+print(forecast_arima)
+
+plot(forecast_arima)
+
+checkresiduals(fit_arima)
+
+```
