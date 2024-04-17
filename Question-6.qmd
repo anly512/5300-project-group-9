@@ -1,0 +1,72 @@
+---
+title: "Question 6: Does the number of the case change along with the area?"
+format: 
+    html:
+        embed-resources: true
+---
+# Data Munging
+```{r}
+library(readxl)
+library(caret)
+library(MASS)
+library(tidyverse)
+```
+
+```{r}
+data <- read_excel('311_Cases_cleaned.xlsx')
+data$neighborhood <- as.factor(data$neighborhood)
+head(data)
+```
+
+```{r}
+# Create a contingency table shows the count of each case type in each neighborhood
+case_counts <- xtabs(~ case + neighborhood, data = data)
+head(case_counts)
+```
+
+```{r}
+case_counts_df <- as.data.frame(case_counts)
+names(case_counts_df) <- c('case_type', 'neighborhood', 'count')
+head(case_counts_df)
+```
+
+
+# Model
+```{r}
+# Now fit the Negative Binomial model
+# The glm.nb function fits a negative binomial model which can be more appropriate for over-dispersed count data
+model <- glm.nb(count ~ neighborhood + case_type, data = case_counts_df)
+summary(model)
+```
+
+Positive coefficient like Mission has a coefficient of 1.71363, suggesting that being in the Mission neighborhood is associated with an increase in case counts compared to the baseline neighborhood
+Negative coefficient like Seacliff has a coefficient of -2.15708, indicating fewer cases compared to the baseline neighborhood
+
+Many of the neighborhoods and case types have significant p-values, indicating strong evidence against the null hypothesis.
+
+Areas like Mission and South of Market show a positive impact on case counts, which could indicate higher activity or reporting rates in these areas. In contrast, areas like Seacliff and Presidio Heights show a negative impact, suggesting lower case counts.
+
+Certain types of cases, such as Graffiti and Street and Sidewalk Cleaning, have high positive coefficients, indicating these are common complaints across the city. Conversely, case types like General Request - AGING ADULT SERVICES and General Request - CITY ATTORNEY have large negative coefficients, suggesting these are less frequently reported or specific to fewer areas.
+
+```{r}
+library(ggplot2)
+library(ggmap)
+```
+
+```{r}
+data_2012_cleaning <- subset(data, year == 2012 & case == "Street and Sidewalk Cleaning")
+```
+
+```{r}
+case_counts <- table(data_2012_cleaning$neighborhood)
+
+# Sorting the neighborhoods by the number of cases to make the histogram more informative
+sorted_counts <- sort(case_counts, decreasing = TRUE)
+
+barplot(sorted_counts, 
+        main = "Histogram of Street and Sidewalk Cleaning Cases by Neighborhood (2012)",
+        xlab = "Neighborhood",
+        ylab = "Number of Cases",
+        las = 2, # makes the labels perpendicular to axis
+        col = "blue") 
+```
