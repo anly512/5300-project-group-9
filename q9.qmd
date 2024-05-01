@@ -1,0 +1,103 @@
+---
+title: "5300project_q9"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+library(dplyr)
+library(readxl)
+
+data <- read_excel("./311_Cases_cleaned.xlsx")
+
+```
+
+```{r}
+str(data)
+summary(data)
+
+data <- na.omit(data)
+
+data$photo.dumm <- as.factor(data$photo.dumm)
+
+data$resolution_time <- as.numeric(data$resolution_time)
+
+```
+
+```{r}
+table(data$photo.dumm)
+```
+
+```{r}
+library(dplyr)
+
+stats_summary <- data %>%
+  group_by(photo.dumm) %>%
+  summarise(
+    count = n(),
+    avg_resolution_time = mean(resolution_time, na.rm = TRUE),
+    sd_resolution_time = sd(resolution_time, na.rm = TRUE),
+    min_resolution_time = min(resolution_time, na.rm = TRUE),
+    max_resolution_time = max(resolution_time, na.rm = TRUE),
+    avg_resolution_rate = mean(resolution_rate, na.rm = TRUE),
+    sd_resolution_rate = sd(resolution_rate, na.rm = TRUE),
+    min_resolution_rate = min(resolution_rate, na.rm = TRUE),
+    max_resolution_rate = max(resolution_rate, na.rm = TRUE)
+  )
+
+print(stats_summary)
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(data, aes(x = as.factor(photo.dumm), y = log1p(resolution_time), fill = as.factor(photo.dumm))) +
+  geom_boxplot(outlier.shape = NA) +  
+  scale_fill_manual(values = c("0" = "#FF9999", "1" = "#9999FF"), 
+                    labels = c("0" = "Without Photo", "1" = "With Photo")) +
+  labs(title = "Boxplot of Log-transformed Resolution Time by Photo Evidence",
+       x = "Photo Evidence",
+       y = "Log-transformed Resolution Time (log(hours+1))",
+       fill = "Photo Evidence") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+
+```
+
+```{r}
+ggplot(data, aes(x = photo.dumm, fill = as.factor(resolution_rate))) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(title = "Resolution Rate by Photo Evidence",
+       x = "Photo Evidence",
+       y = "Percentage of Cases",
+       fill = "Resolution Rate") +
+  scale_fill_manual(values = c("0" = "#FF9999", "1" = "#9999FF"),
+                    labels = c("0" = "Not Resolved", "1" = "Resolved")) +
+  theme_minimal()
+
+```
+
+```{r}
+par(mfrow=c(1, 2))  
+hist(log1p(data$resolution_time[data$photo.dumm == "0"]), main="Log-Resolution Time Without Photo")
+hist(log1p(data$resolution_time[data$photo.dumm == "1"]), main="Log-Resolution Time With Photo")
+
+wilcox.test(resolution_time ~ photo.dumm, data=data, exact=FALSE)
+
+
+```
+
+"The Wilcoxon rank sum test indicates a statistically significant difference in resolution time between cases with photo evidence and those without (W = 3.5024e+10, p-value \< 2.2e-16). The alternative hypothesis, which suggests that the true location shift is not equal to zero, is supported. This implies that the presence of photo evidence has an association with the time it takes to resolve a case."
+
+```{r}
+resolution_rate_table <- table(data$photo.dumm, data$resolution_rate)
+
+chisq.test(resolution_rate_table)
+
+```
+
+"The Pearson's Chi-squared test with Yates' continuity correction reveals a statistically significant association between the resolution rate and the presence of photo evidence (X-squared = 1925.1, df = 1, p-value \< 2.2e-16). This indicates that the difference in the resolution rate for cases with and without photo evidence is not due to chance, and there is a significant correlation between having photo evidence and the likelihood of a case being resolved."
